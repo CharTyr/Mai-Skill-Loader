@@ -342,8 +342,10 @@ def _is_admin(user_id: str, admin_ids: List[str]) -> bool:
 
 async def _wait_admin_approval(command: str, cfg: CapabilitiesConfig, ctx: Any, stream_id: str) -> bool:
     """发送审批请求并等待管理员回复 Y/n。"""
-    if not ctx or not stream_id or not cfg.admin_ids:
-        return True  # 无法审批时默认放行
+    if not cfg.admin_ids:
+        return False  # 未配置管理员时拒绝所有 bash
+    if not ctx or not stream_id:
+        return False  # 无法发送审批请求时拒绝
 
     # 发送审批请求
     approval_msg = (

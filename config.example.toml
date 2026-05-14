@@ -3,6 +3,7 @@
 
 [skill_loader]
 enabled = true
+config_version = "1.0.0"
 skills_dir = "skills"
 default_model = ""           # 留空使用系统默认模型，填写 model_config.toml 中的模型 name
 default_max_turns = 10       # agent 模式默认最大轮数
@@ -10,19 +11,33 @@ timeout_seconds = 60         # skill 执行超时（秒）
 agent_max_context_tokens = 8000  # agent 上下文 token 预算
 
 [capabilities]
-allow_bash = false           # 允许执行 shell 命令
-allow_python = false         # 允许执行 Python 代码
-allow_read_file = true       # 允许读取文件
-allow_write_file = false     # 允许写入文件
-allow_http = true            # 允许 HTTP 请求
+allow_bash = true            # 允许执行 shell 命令
+allow_read = true            # 允许读取文件
+allow_write = false          # 允许写入文件
+allow_edit = false           # 允许编辑文件（查找替换）
 
 bash_working_dir = ""        # bash 工作目录（空=插件目录）
 bash_timeout = 30            # bash 命令超时（秒）
-bash_blocked_commands = ["rm -rf /", "mkfs", "dd if=", "shutdown", "reboot"]
+bash_require_approval = true # bash 命令需要管理员审批
+bash_approval_timeout = 120  # 审批等待超时（秒）
 
-read_file_allowed_dirs = []  # 读取目录白名单（空=不限）
-write_file_allowed_dirs = [] # 写入目录白名单（空=不限）
-write_file_max_size_kb = 1024
+# 管理员 ID 列表，支持 "qq:123456" 或纯数字格式
+# 未配置时所有 bash 命令将被拒绝
+admin_ids = []
 
-http_allowed_domains = []    # HTTP 域名白名单（空=不限）
-http_timeout = 30
+# 高危命令黑名单（包含即拒绝，无需审批直接阻止）
+bash_blocked_commands = [
+    "rm -rf /", "rm -rf ~", "rm -rf .", "rmdir /",
+    "mkfs", "dd if=", "shutdown", "reboot", "poweroff",
+    "chmod -R 777 /", "chown -R",
+    "curl|bash", "curl|sh", "wget|bash", "wget|sh",
+    "> /dev/sda", "cat /dev/zero",
+    "passwd", "useradd", "userdel", "visudo",
+    "iptables -F", "ufw disable",
+    "systemctl stop", "systemctl disable",
+    "kill -9 1", "killall",
+]
+
+read_allowed_dirs = []       # 读取目录白名单（空=不限）
+write_allowed_dirs = []      # 写入目录白名单（空=不限）
+write_max_size_kb = 1024     # 写入文件最大 KB
