@@ -7,6 +7,10 @@
 - Capabilities 带安全限制
 - /skill reload 热加载
 - /skill enable|disable 运行时开关
+
+TODO:
+- 多轮追问：维护 stream_id + skill_name 的短期会话缓存，同一 skill 短时间内再次调用时延续上下文
+- 聊天上下文注入：从 kwargs 中提取 Maisaka 的近期聊天记录，注入 skill agent 的 user message 作为背景
 """
 
 from typing import Any, Dict, List, Optional
@@ -863,6 +867,11 @@ class SkillLoaderPlugin(MaiBotPlugin):
 
     async def on_unload(self) -> None:
         logger.info("Skill Loader 已卸载")
+
+    async def on_config_update(self, scope: str, config_data: Dict[str, Any], version: str) -> None:
+        """处理配置热更新。"""
+        if scope == "self":
+            logger.info("Skill Loader 配置已更新")
 
 
 def create_plugin() -> SkillLoaderPlugin:
