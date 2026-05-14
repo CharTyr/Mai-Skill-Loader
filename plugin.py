@@ -348,8 +348,11 @@ async def _cap_bash(command: str, cfg: CapabilitiesConfig) -> str:
 async def _cap_read_file(path: str, cfg: CapabilitiesConfig, max_lines: int = 200) -> str:
     fp = Path(path).resolve()
     if cfg.read_file_allowed_dirs:
-        if not any(str(fp).startswith(str(Path(d).resolve())) for d in cfg.read_file_allowed_dirs):
+        allowed_roots = [Path(d).resolve() for d in cfg.read_file_allowed_dirs]
+        if not any(fp == root or root in fp.parents for root in allowed_roots):
             return f"安全策略阻止: {path} 不在白名单目录中"
+    if fp.is_symlink():
+        return f"安全策略阻止: 不允许读取符号链接"
     if not fp.exists():
         return f"文件不存在: {path}"
     try:
@@ -364,7 +367,8 @@ async def _cap_read_file(path: str, cfg: CapabilitiesConfig, max_lines: int = 20
 async def _cap_write_file(path: str, content: str, cfg: CapabilitiesConfig) -> str:
     fp = Path(path).resolve()
     if cfg.write_file_allowed_dirs:
-        if not any(str(fp).startswith(str(Path(d).resolve())) for d in cfg.write_file_allowed_dirs):
+        allowed_roots = [Path(d).resolve() for d in cfg.write_file_allowed_dirs]
+        if not any(fp == root or root in fp.parents for root in allowed_roots):
             return f"安全策略阻止: {path} 不在白名单目录中"
     if len(content.encode()) > cfg.write_file_max_size_kb * 1024:
         return f"内容超过 {cfg.write_file_max_size_kb}KB 限制"
