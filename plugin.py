@@ -1,16 +1,14 @@
-"""Skill Loader v2 — Agent Skills 适配器
+"""Skill Loader v2 — Agent Skills 加载器
 
 架构：
 - 覆写 get_components() 动态返回 skill tools
 - 覆写 invoke_component() 统一分发 skill 调用
 - Agent loop 带 token budget 和 context 截断
-- Capabilities 带安全限制
+- Capabilities 带安全限制（bash 审批、路径白名单、高危命令黑名单）
+- 多轮会话缓存（stream_id + skill_name 维度）
+- 聊天上下文注入
 - /skill reload 热加载
 - /skill enable|disable 运行时开关
-
-TODO:
-- 多轮追问：维护 stream_id + skill_name 的短期会话缓存，同一 skill 短时间内再次调用时延续上下文
-- 聊天上下文注入：从 kwargs 中提取 Maisaka 的近期聊天记录，注入 skill agent 的 user message 作为背景
 """
 
 from typing import Any, Dict, List, Optional
@@ -85,6 +83,9 @@ class SkillLoaderConfig(PluginConfigBase):
     default_max_turns: int = Field(default=10, description="agent 默认最大轮数")
     timeout_seconds: int = Field(default=60, description="skill 调用超时（秒）")
     agent_max_context_tokens: int = Field(default=8000, description="agent 上下文 token 预算")
+    session_enabled: bool = Field(default=True, description="是否启用多轮会话")
+    session_ttl_seconds: int = Field(default=300, description="会话过期时间（秒），超时未交互则清除")
+    session_max_history: int = Field(default=20, description="会话最多保留的消息轮数（超出截断旧轮）")
     capabilities: CapabilitiesConfig = Field(default_factory=CapabilitiesConfig)
 
 
@@ -584,6 +585,60 @@ async def _cap_edit_file(path: str, old_str: str, new_str: str, cfg: Capabilitie
         return f"编辑失败: {e}"
 
 
+# ====== 多轮会话缓存 ======
+
+
+class SessionStore:
+    """管理 skill 多轮会话的短期缓存。"""
+
+    def __init__(self):
+        # key: "stream_id:skill_name" → {"messages": [...], "last_active": timestamp}
+        self._sessions: Dict[str, Dict[str, Any]] = {}
+
+    def _key(self, stream_id: str, skill_name: str) -> str:
+        return f"{stream_id}:{skill_name}"
+
+    def get(self, stream_id: str, skill_name: str, ttl: int) -> Optional[List[Dict[str, Any]]]:
+        """获取活跃会话的 messages，过期返回 None。"""
+        key = self._key(stream_id, skill_name)
+        session = self._sessions.get(key)
+        if not session:
+            return None
+        if time.time() - session["last_active"] > ttl:
+            del self._sessions[key]
+            return None
+        return session["messages"]
+
+    def save(self, stream_id: str, skill_name: str, messages: List[Dict[str, Any]], max_history: int) -> None:
+        """保存会话 messages，截断超出的旧轮。"""
+        key = self._key(stream_id, skill_name)
+        # 保留 system message + 最近 max_history 条非 system 消息
+        system_msgs = [m for m in messages if m.get("role") == "system"]
+        other_msgs = [m for m in messages if m.get("role") != "system"]
+        if len(other_msgs) > max_history:
+            other_msgs = other_msgs[-max_history:]
+        self._sessions[key] = {
+            "messages": system_msgs + other_msgs,
+            "last_active": time.time(),
+        }
+
+    def clear(self, stream_id: str, skill_name: str) -> None:
+        """清除指定会话。"""
+        key = self._key(stream_id, skill_name)
+        self._sessions.pop(key, None)
+
+    def cleanup_expired(self, ttl: int) -> None:
+        """清理所有过期会话。"""
+        now = time.time()
+        expired = [k for k, v in self._sessions.items() if now - v["last_active"] > ttl]
+        for k in expired:
+            del self._sessions[k]
+
+
+# 全局会话存储实例
+_session_store = SessionStore()
+
+
 # ====== Agent Loop ======
 
 
@@ -708,12 +763,26 @@ async def run_agent_loop(
     if chat_context:
         user_content = f"[最近的聊天记录，供你了解对话背景]\n{chat_context}\n\n[用户当前的需求]\n{task}"
 
-    messages: List[Dict[str, Any]] = [
-        {"role": "system", "content": system_content},
-        {"role": "user", "content": user_content},
-    ]
+    # 多轮会话：尝试恢复已有 session
+    messages: List[Dict[str, Any]] = []
+    if config.session_enabled and stream_id:
+        existing = _session_store.get(stream_id, skill.name, config.session_ttl_seconds)
+        if existing:
+            # 延续已有会话，追加新的 user message
+            messages = existing.copy()
+            messages.append({"role": "user", "content": user_content})
+        # 顺便清理过期会话
+        _session_store.cleanup_expired(config.session_ttl_seconds)
+
+    if not messages:
+        # 新建会话
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content},
+        ]
 
     response_text = ""
+    final_result = ""
     for turn in range(max_turns):
         # Token 截断
         messages = _truncate_messages(messages, max_tokens)
@@ -724,19 +793,23 @@ async def run_agent_loop(
             else:
                 result = await ctx.llm.generate(prompt=messages, model=model)
         except Exception as e:
-            return f"Agent LLM 调用失败: {e}"
+            final_result = f"Agent LLM 调用失败: {e}"
+            break
 
         if not result.get("success", False):
             error = result.get("error", "未知错误")
             if turn > 0 and response_text:
-                return response_text + f"\n\n[Agent 在第 {turn+1} 轮遇到错误: {error}]"
-            return f"Agent 调用失败: {error}"
+                final_result = response_text + f"\n\n[Agent 在第 {turn+1} 轮遇到错误: {error}]"
+            else:
+                final_result = f"Agent 调用失败: {error}"
+            break
 
         response_text = result.get("response", "")
         tool_calls = result.get("tool_calls", [])
 
         if not tool_calls:
-            return response_text
+            final_result = response_text
+            break
 
         messages.append({"role": "assistant", "content": response_text, "tool_calls": [
             {"id": tc.get("id", ""), "type": "function", "function": tc.get("function", {})}
@@ -772,8 +845,17 @@ async def run_agent_loop(
                 tool_result = tool_result[:10000] + "\n... (结果已截断)"
 
             messages.append({"role": "tool", "tool_call_id": tc_id, "content": tool_result})
+    else:
+        final_result = response_text or f"Agent 达到最大轮数 ({max_turns})"
 
-    return response_text or f"Agent 达到最大轮数 ({max_turns})"
+    # 保存多轮会话
+    if config.session_enabled and stream_id:
+        # 把最终 assistant 回复也加入 messages（如果还没加）
+        if final_result and (not messages or messages[-1].get("role") != "assistant"):
+            messages.append({"role": "assistant", "content": final_result})
+        _session_store.save(stream_id, skill.name, messages, config.session_max_history)
+
+    return final_result
 
 
 async def run_direct_skill(skill: SkillDefinition, task: str) -> str:

@@ -9,6 +9,9 @@ default_model = ""           # 留空使用系统默认模型，填写 model_con
 default_max_turns = 10       # agent 模式默认最大轮数
 timeout_seconds = 60         # skill 执行超时（秒）
 agent_max_context_tokens = 8000  # agent 上下文 token 预算
+session_enabled = true       # 是否启用多轮会话
+session_ttl_seconds = 300    # 会话过期时间（秒），超时未交互则清除
+session_max_history = 20     # 会话最多保留的消息轮数（超出截断旧轮）
 
 [capabilities]
 allow_bash = true            # 允许执行 shell 命令
