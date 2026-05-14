@@ -64,6 +64,12 @@ class CapabilitiesConfig(PluginConfigBase):
     read_allowed_dirs: List[str] = Field(default_factory=list, description="读取目录白名单（空=不限）")
     write_allowed_dirs: List[str] = Field(default_factory=list, description="写入目录白名单（空=不限）")
     write_max_size_kb: int = Field(default=1024, description="写入文件最大 KB")
+    bash_require_approval: bool = Field(default=True, description="bash 命令是否需要管理员审批")
+    bash_approval_timeout: int = Field(default=120, description="审批等待超时（秒）")
+    admin_ids: List[str] = Field(
+        default_factory=list,
+        description="管理员 ID 列表（格式: 'qq:123456' 或纯数字 QQ 号）",
+    )
 
 
 class SkillLoaderConfig(PluginConfigBase):
@@ -306,10 +312,11 @@ def get_allowed_caps(skill: SkillDefinition, cap_cfg: CapabilitiesConfig) -> Lis
     return [c for c in skill.capabilities if perm.get(c, False)]
 
 
-async def run_capability(name: str, args: Dict[str, Any], cfg: CapabilitiesConfig) -> str:
+async def run_capability(name: str, args: Dict[str, Any], cfg: CapabilitiesConfig,
+                        ctx: Any = None, stream_id: str = "") -> str:
     """执行单个 capability tool。"""
     if name == "bash":
-        return await _cap_bash(args.get("command", ""), cfg)
+        return await _cap_bash(args.get("command", ""), cfg, ctx=ctx, stream_id=stream_id)
     elif name == "read":
         return await _cap_read_file(args.get("path", ""), cfg, int(args.get("max_lines", 200)))
     elif name == "write":
@@ -319,10 +326,75 @@ async def run_capability(name: str, args: Dict[str, Any], cfg: CapabilitiesConfi
     return f"未知 capability: {name}"
 
 
-async def _cap_bash(command: str, cfg: CapabilitiesConfig) -> str:
+def _is_admin(user_id: str, admin_ids: List[str]) -> bool:
+    """检查用户是否为管理员。支持 'platform:id' 和纯数字格式。"""
+    for admin in admin_ids:
+        if ":" in admin:
+            # 格式: qq:123456
+            if user_id == admin.split(":", 1)[1]:
+                return True
+        else:
+            # 纯数字 QQ 号
+            if user_id == admin:
+                return True
+    return False
+
+
+async def _wait_admin_approval(command: str, cfg: CapabilitiesConfig, ctx: Any, stream_id: str) -> bool:
+    """发送审批请求并等待管理员回复 Y/n。"""
+    if not ctx or not stream_id or not cfg.admin_ids:
+        return True  # 无法审批时默认放行
+
+    # 发送审批请求
+    approval_msg = (
+        f"[Skill Loader 安全审批]\n"
+        f"Skill agent 请求执行以下命令:\n"
+        f"$ {command}\n\n"
+        f"管理员请回复 Y 同意 / N 拒绝（{cfg.bash_approval_timeout}秒超时自动拒绝）"
+    )
+    await ctx.send.text(approval_msg, stream_id)
+
+    # 轮询等待管理员回复
+    start_time = time.time()
+    poll_interval = 2  # 每2秒检查一次
+    while time.time() - start_time < cfg.bash_approval_timeout:
+        await asyncio.sleep(poll_interval)
+        try:
+            recent = await ctx.message.get_recent(stream_id, limit=10)
+            if not recent:
+                continue
+            for msg in recent:
+                # 检查是否是审批请求之后的消息
+                msg_time = msg.get("timestamp", 0)
+                if msg_time < start_time:
+                    continue
+                sender_id = str(msg.get("user_id", ""))
+                if not _is_admin(sender_id, cfg.admin_ids):
+                    continue
+                content = str(msg.get("content", "")).strip().upper()
+                if content in ("Y", "YES", "是", "同意"):
+                    await ctx.send.text("[审批通过] 正在执行命令...", stream_id)
+                    return True
+                if content in ("N", "NO", "否", "拒绝"):
+                    return False
+        except Exception:
+            continue
+
+    return False  # 超时自动拒绝
+
+
+async def _cap_bash(command: str, cfg: CapabilitiesConfig, ctx: Any = None, stream_id: str = "") -> str:
+    # 高危命令直接拒绝
     for blocked in cfg.bash_blocked_commands:
         if blocked in command:
             return f"安全策略阻止: 命令包含 '{blocked}'"
+
+    # 需要管理员审批
+    if cfg.bash_require_approval:
+        approved = await _wait_admin_approval(command, cfg, ctx, stream_id)
+        if not approved:
+            return "管理员拒绝执行该命令，或审批超时。"
+
     try:
         proc = await asyncio.create_subprocess_shell(
             command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -507,7 +579,7 @@ def _build_script_tools(skill: SkillDefinition) -> List[Dict[str, Any]]:
 
 async def run_agent_loop(
     skill: SkillDefinition, task: str, ctx: Any, config: SkillLoaderConfig,
-    chat_context: str = "",
+    chat_context: str = "", stream_id: str = "",
 ) -> str:
     """执行 agent 模式 skill。"""
     model = skill.model or config.default_model
@@ -605,7 +677,7 @@ async def run_agent_loop(
 
             # 分发：capability 还是 script
             if fn_name in cap_names:
-                tool_result = await run_capability(fn_name, fn_args, cap_cfg)
+                tool_result = await run_capability(fn_name, fn_args, cap_cfg, ctx=ctx, stream_id=stream_id)
             elif fn_name in script_fns:
                 try:
                     fn = script_fns[fn_name]
@@ -833,7 +905,7 @@ class SkillLoaderPlugin(MaiBotPlugin):
             chat_context = ""
             if stream_id:
                 chat_context = await self._get_chat_context(stream_id)
-            coro = run_agent_loop(skill, task, self.ctx, self.config, chat_context=chat_context)
+            coro = run_agent_loop(skill, task, self.ctx, self.config, chat_context=chat_context, stream_id=stream_id)
 
         real_task = asyncio.ensure_future(coro)
         try:
