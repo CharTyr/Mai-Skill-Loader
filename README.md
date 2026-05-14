@@ -1,8 +1,6 @@
 # Mai-Skill-Loader
 
-让你的 MaiBot 通过 [Agent Skills](https://agentskills.io) 标准获得新能力。
-
-只需把 skill 文件夹丢进目录，bot 就能自动识别并使用 —— 不需要写代码，不需要改配置。
+为MaiBot（MaiSaka）提供标准的[Agent Skills](https://agentskills.io)兼容支持，允许独立配置skill调用的LLM以获得更好的效果
 
 ## 快速开始
 
