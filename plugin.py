@@ -94,9 +94,9 @@ class SkillLoaderConfig(PluginConfigBase):
 # allowed-tools 到 maibot capabilities 的映射
 TOOLS_TO_CAPS: Dict[str, str] = {
     "bash": "bash", "Bash": "bash",
-    "read": "read", "Read": "read", "read_file": "read",
-    "write": "write", "Write": "write", "write_file": "write",
-    "edit": "edit", "Edit": "edit", "edit_file": "edit",
+    "read": "read", "Read": "read",
+    "write": "write", "Write": "write",
+    "edit": "edit", "Edit": "edit",
 }
 
 # name 格式校验正则：小写字母、数字、连字符，不能以连字符开头/结尾，不能连续连字符
