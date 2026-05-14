@@ -1,0 +1,6 @@
+# Skill Loader 插件忽略规则
+__pycache__/
+*.pyc
+*.pyo
+.agents/
+skills-lock.json

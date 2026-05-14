@@ -1,0 +1,36 @@
+{
+  "manifest_version": 2,
+  "version": "1.0.0",
+  "name": "Skill Loader (Agent Skills 适配器)",
+  "description": "加载 Agent Skills 规范的 skill 文件夹，自动注册为 LLM 可调用的 Tool 组件。支持 direct 和 agent 两种执行模式。",
+  "author": {
+    "name": "Seren",
+    "url": "https://github.com/A-Dawn/MaiBot"
+  },
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/CharTyr/Mai-Skill-Loader",
+    "homepage": "https://github.com/CharTyr/Mai-Skill-Loader"
+  },
+  "host_application": {
+    "min_version": "1.0.0",
+    "max_version": "1.0.0"
+  },
+  "sdk": {
+    "min_version": "2.0.0",
+    "max_version": "2.99.99"
+  },
+  "dependencies": [],
+  "capabilities": [
+    "llm.generate",
+    "llm.generate_with_tools",
+    "llm.get_available_models",
+    "config.get"
+  ],
+  "i18n": {
+    "default_locale": "zh-CN",
+    "locales_path": "_locales",
+    "supported_locales": ["zh-CN"]
+  },
+  "id": "seren.skill-loader"
+}
