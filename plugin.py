@@ -318,7 +318,8 @@ async def run_capability(name: str, args: Dict[str, Any], cfg: CapabilitiesConfi
     if name == "bash":
         return await _cap_bash(args.get("command", ""), cfg, ctx=ctx, stream_id=stream_id)
     elif name == "read":
-        return await _cap_read_file(args.get("path", ""), cfg, int(args.get("max_lines", 200)))
+        return await _cap_read_file(args.get("path", ""), cfg, int(args.get("max_lines", 200)),
+                                    ctx=ctx, stream_id=stream_id)
     elif name == "write":
         return await _cap_write_file(args.get("path", ""), args.get("content", ""), cfg)
     elif name == "edit":
@@ -418,7 +419,81 @@ async def _cap_bash(command: str, cfg: CapabilitiesConfig, ctx: Any = None, stre
         return f"执行失败: {e}"
 
 
-async def _cap_read_file(path: str, cfg: CapabilitiesConfig, max_lines: int = 200) -> str:
+async def _ensure_dependency(package_name: str, pip_name: str, cfg: CapabilitiesConfig,
+                             ctx: Any = None, stream_id: str = "") -> Optional[str]:
+    """尝试导入依赖，失败时走审批安装流程。返回 None 表示成功，返回错误字符串表示失败。"""
+    try:
+        __import__(package_name)
+        return None
+    except ImportError:
+        pass
+
+    # 走审批流程安装
+    if not ctx or not stream_id or not cfg.admin_ids:
+        return f"缺少 {pip_name} 依赖，且无法请求管理员审批安装"
+
+    install_msg = (
+        f"[Skill Loader 依赖安装审批]\n"
+        f"读取文件需要安装依赖: {pip_name}\n"
+        f"管理员请回复 Y 同意安装 / N 拒绝（{cfg.bash_approval_timeout}秒超时自动拒绝）"
+    )
+    await ctx.send.text(install_msg, stream_id)
+
+    # 复用审批等待逻辑
+    start_time = time.time()
+    approved = False
+    while time.time() - start_time < cfg.bash_approval_timeout:
+        await asyncio.sleep(2)
+        try:
+            recent = await ctx.message.get_recent(stream_id, limit=10)
+            if not recent:
+                continue
+            for msg in recent:
+                msg_time = msg.get("timestamp", 0)
+                if msg_time < start_time:
+                    continue
+                sender_id = str(msg.get("user_id", ""))
+                if not _is_admin(sender_id, cfg.admin_ids):
+                    continue
+                content = str(msg.get("content", "")).strip().upper()
+                if content in ("Y", "YES", "是", "同意"):
+                    approved = True
+                    break
+                if content in ("N", "NO", "否", "拒绝"):
+                    return f"管理员拒绝安装 {pip_name}"
+            if approved:
+                break
+        except Exception:
+            continue
+
+    if not approved:
+        return f"安装 {pip_name} 审批超时"
+
+    # 执行安装
+    await ctx.send.text(f"[审批通过] 正在安装 {pip_name}...", stream_id)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "pip", "install", pip_name,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+        if proc.returncode != 0:
+            err = stderr.decode("utf-8", errors="replace")[:2000]
+            return f"安装 {pip_name} 失败: {err}"
+    except asyncio.TimeoutError:
+        return f"安装 {pip_name} 超时"
+
+    # 验证安装成功
+    try:
+        __import__(package_name)
+        await ctx.send.text(f"[已安装] {pip_name} 安装成功", stream_id)
+        return None
+    except ImportError:
+        return f"安装 {pip_name} 后仍无法导入"
+
+
+async def _cap_read_file(path: str, cfg: CapabilitiesConfig, max_lines: int = 200,
+                         ctx: Any = None, stream_id: str = "") -> str:
     fp = Path(path).resolve()
     if cfg.read_allowed_dirs:
         allowed_roots = [Path(d).resolve() for d in cfg.read_allowed_dirs]
@@ -433,10 +508,10 @@ async def _cap_read_file(path: str, cfg: CapabilitiesConfig, max_lines: int = 20
     try:
         # docx 文件
         if suffix == ".docx":
-            try:
-                from docx import Document
-            except ImportError:
-                return "缺少 python-docx 依赖，无法读取 docx 文件"
+            err = await _ensure_dependency("docx", "python-docx", cfg, ctx, stream_id)
+            if err:
+                return err
+            from docx import Document
             doc = Document(str(fp))
             content = "\n".join(p.text for p in doc.paragraphs)
             if len(content) > 60000:
@@ -445,10 +520,10 @@ async def _cap_read_file(path: str, cfg: CapabilitiesConfig, max_lines: int = 20
 
         # pdf 文件
         if suffix == ".pdf":
-            try:
-                from pypdf import PdfReader
-            except ImportError:
-                return "缺少 pypdf 依赖，无法读取 pdf 文件"
+            err = await _ensure_dependency("pypdf", "pypdf", cfg, ctx, stream_id)
+            if err:
+                return err
+            from pypdf import PdfReader
             reader = PdfReader(str(fp))
             pages = []
             for i, page in enumerate(reader.pages, 1):
