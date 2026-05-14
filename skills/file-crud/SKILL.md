@@ -1,6 +1,6 @@
 ---
 name: file-crud
-description: 文件管理工具。下载URL文件、读取文档（txt/md/docx/pdf）、写入文件、列出目录。当用户发送文件、要求读取/保存/下载文件时使用。
+description: 文件管理工具。当消息中出现[文件]标记或用户要求下载/读取/保存文件时使用。能下载URL文件、读取文档（txt/md/docx/pdf）、写入文件、列出目录。
 allowed-tools: Bash Read Write Edit
 metadata:
   maibot-mode: agent

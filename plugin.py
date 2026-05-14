@@ -41,7 +41,7 @@ class CapabilitiesConfig(PluginConfigBase):
     __ui_icon__ = "shield"
     __ui_order__ = 1
 
-    allow_bash: bool = Field(default=False, description="允许执行 shell 命令")
+    allow_bash: bool = Field(default=True, description="允许执行 shell 命令")
     allow_read: bool = Field(default=True, description="允许读取文件")
     allow_write: bool = Field(default=False, description="允许写入文件")
     allow_edit: bool = Field(default=False, description="允许编辑文件（查找替换）")
