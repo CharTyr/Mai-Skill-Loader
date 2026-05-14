@@ -226,6 +226,12 @@ def parse_skill(skill_path: Path) -> Optional[SkillDefinition]:
     model = str(metadata.get("maibot-model", "")).strip()
     max_turns = int(metadata.get("maibot-max-turns", 10))
 
+    # 是否默认启用（maibot-enabled: false 则跳过）
+    enabled = str(metadata.get("maibot-enabled", "true")).strip().lower()
+    if enabled in ("false", "0", "no", "off"):
+        logger.info(f"Skill '{name}' 已禁用 (maibot-enabled: false)")
+        return None
+
     # scripts/ 目录
     scripts: Dict[str, Path] = {}
     scripts_dir = skill_path / "scripts"

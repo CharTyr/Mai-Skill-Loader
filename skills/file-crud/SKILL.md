@@ -5,6 +5,7 @@ allowed-tools: Bash Read Write Edit
 metadata:
   maibot-mode: agent
   maibot-max-turns: "6"
+  maibot-enabled: "false"
 ---
 
 ## 角色
