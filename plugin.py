@@ -482,7 +482,8 @@ def _build_script_tools(skill: SkillDefinition) -> List[Dict[str, Any]]:
 
 
 async def run_agent_loop(
-    skill: SkillDefinition, task: str, ctx: Any, config: SkillLoaderConfig
+    skill: SkillDefinition, task: str, ctx: Any, config: SkillLoaderConfig,
+    chat_context: str = "",
 ) -> str:
     """执行 agent 模式 skill。"""
     model = skill.model or config.default_model
@@ -529,9 +530,14 @@ async def run_agent_loop(
     if denied_caps:
         system_content += f"\n\n[系统提示] 以下能力因权限未开启不可用: {', '.join(denied_caps)}。请在不使用它们的前提下完成任务。"
 
+    # 构建 user message：聊天上下文 + 任务
+    user_content = task
+    if chat_context:
+        user_content = f"[最近的聊天记录，供你了解对话背景]\n{chat_context}\n\n[用户当前的需求]\n{task}"
+
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": system_content},
-        {"role": "user", "content": task},
+        {"role": "user", "content": user_content},
     ]
 
     response_text = ""
@@ -739,6 +745,19 @@ class SkillLoaderPlugin(MaiBotPlugin):
             return await self._invoke_skill(component_name, **kwargs)
         return {"name": component_name, "content": f"未知组件: {component_name}"}
 
+    async def _get_chat_context(self, stream_id: str, limit: int = 10) -> str:
+        """获取最近的聊天记录作为上下文。"""
+        try:
+            messages = await self.ctx.message.get_recent(stream_id, limit=limit)
+            if not messages:
+                return ""
+            readable = await self.ctx.message.build_readable(messages)
+            if readable:
+                return str(readable)
+        except Exception as e:
+            logger.debug(f"获取聊天上下文失败: {e}")
+        return ""
+
     async def _invoke_skill(self, skill_name: str = "", task: str = "", **kwargs) -> Dict[str, str]:
         """执行 skill。"""
         # invoke_component 传入 component_name，也可能直接被 handler 调用
@@ -786,7 +805,11 @@ class SkillLoaderPlugin(MaiBotPlugin):
         if skill.mode == "direct":
             coro = run_direct_skill(skill, task)
         else:
-            coro = run_agent_loop(skill, task, self.ctx, self.config)
+            # 获取聊天上下文注入给 agent
+            chat_context = ""
+            if stream_id:
+                chat_context = await self._get_chat_context(stream_id)
+            coro = run_agent_loop(skill, task, self.ctx, self.config, chat_context=chat_context)
 
         real_task = asyncio.ensure_future(coro)
         try:

@@ -25,7 +25,9 @@
     "llm.generate",
     "llm.generate_with_tools",
     "llm.get_available_models",
-    "config.get"
+    "config.get",
+    "message.get_recent",
+    "message.build_readable"
   ],
   "i18n": {
     "default_locale": "zh-CN",
