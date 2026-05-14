@@ -4,3 +4,4 @@ __pycache__/
 *.pyo
 .agents/
 skills-lock.json
+config.toml
