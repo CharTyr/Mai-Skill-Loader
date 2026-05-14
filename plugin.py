@@ -69,6 +69,7 @@ class SkillLoaderConfig(PluginConfigBase):
     __ui_order__ = 0
 
     enabled: bool = Field(default=True, description="是否启用")
+    config_version: str = Field(default="1.0.0", description="配置版本")
     skills_dir: str = Field(default="skills", description="skills 目录路径")
     default_model: str = Field(default="", description="agent 默认模型（空=系统默认）")
     default_max_turns: int = Field(default=10, description="agent 默认最大轮数")
@@ -680,7 +681,7 @@ class TaskManager:
 class SkillLoaderPlugin(MaiBotPlugin):
     """Skill Loader 插件 — 加载 Agent Skills 并注册为独立 Tool。"""
 
-    config_class = SkillLoaderConfig
+    config_model = SkillLoaderConfig
 
     def __init__(self):
         super().__init__()
