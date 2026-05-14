@@ -753,7 +753,7 @@ async def run_agent_loop(
             resource_hints.append(f"资源文件目录 (assets/): {', '.join(assets)}")
     if resource_hints:
         system_content += "\n\n[可用资源]\n" + "\n".join(resource_hints)
-        system_content += f"\n使用 read_file 工具读取，路径前缀: {skill.skill_path}/"
+        system_content += f"\n使用 read 工具读取，路径前缀: {skill.skill_path}/"
 
     if denied_caps:
         system_content += f"\n\n[系统提示] 以下能力因权限未开启不可用: {', '.join(denied_caps)}。请在不使用它们的前提下完成任务。"
@@ -1098,9 +1098,8 @@ class SkillLoaderPlugin(MaiBotPlugin):
         elif action == "caps":
             cfg = self.config.capabilities
             status = {
-                "bash": cfg.allow_bash, "python": cfg.allow_python,
-                "read_file": cfg.allow_read_file, "write_file": cfg.allow_write_file,
-                "http": cfg.allow_http,
+                "bash": cfg.allow_bash, "read": cfg.allow_read,
+                "write": cfg.allow_write, "edit": cfg.allow_edit,
             }
             lines = ["Capabilities 状态:"]
             for name, enabled in status.items():
@@ -1124,9 +1123,8 @@ class SkillLoaderPlugin(MaiBotPlugin):
         """设置 capability 开关。"""
         cfg = self.config.capabilities
         cap_map = {
-            "bash": "allow_bash", "python": "allow_python",
-            "read_file": "allow_read_file", "write_file": "allow_write_file",
-            "http": "allow_http",
+            "bash": "allow_bash", "read": "allow_read",
+            "write": "allow_write", "edit": "allow_edit",
         }
         action_word = "开启" if enable else "关闭"
 
