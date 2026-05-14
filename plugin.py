@@ -17,16 +17,13 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 import asyncio
-import contextlib
 import importlib.util
-import io
 import json
 import logging
 import re
 import sys
 import time
 import traceback
-from urllib.parse import urlparse
 
 import yaml
 
@@ -45,21 +42,18 @@ class CapabilitiesConfig(PluginConfigBase):
     __ui_order__ = 1
 
     allow_bash: bool = Field(default=False, description="允许执行 shell 命令")
-    allow_python: bool = Field(default=False, description="允许执行 Python 代码")
-    allow_read_file: bool = Field(default=True, description="允许读取文件")
-    allow_write_file: bool = Field(default=False, description="允许写入文件")
-    allow_http: bool = Field(default=True, description="允许 HTTP 请求")
+    allow_read: bool = Field(default=True, description="允许读取文件")
+    allow_write: bool = Field(default=False, description="允许写入文件")
+    allow_edit: bool = Field(default=False, description="允许编辑文件（查找替换）")
     bash_working_dir: str = Field(default="", description="bash 工作目录（空=插件目录）")
     bash_timeout: int = Field(default=30, description="bash 命令超时（秒）")
     bash_blocked_commands: List[str] = Field(
         default_factory=lambda: ["rm -rf /", "mkfs", "dd if=", "shutdown", "reboot"],
         description="禁止的命令模式",
     )
-    read_file_allowed_dirs: List[str] = Field(default_factory=list, description="读取目录白名单（空=不限）")
-    write_file_allowed_dirs: List[str] = Field(default_factory=list, description="写入目录白名单（空=不限）")
-    write_file_max_size_kb: int = Field(default=1024, description="写入文件最大 KB")
-    http_allowed_domains: List[str] = Field(default_factory=list, description="HTTP 域名白名单（空=不限）")
-    http_timeout: int = Field(default=30, description="HTTP 超时（秒）")
+    read_allowed_dirs: List[str] = Field(default_factory=list, description="读取目录白名单（空=不限）")
+    write_allowed_dirs: List[str] = Field(default_factory=list, description="写入目录白名单（空=不限）")
+    write_max_size_kb: int = Field(default=1024, description="写入文件最大 KB")
 
 
 class SkillLoaderConfig(PluginConfigBase):
@@ -83,10 +77,9 @@ class SkillLoaderConfig(PluginConfigBase):
 # allowed-tools 到 maibot capabilities 的映射
 TOOLS_TO_CAPS: Dict[str, str] = {
     "bash": "bash", "Bash": "bash",
-    "read": "read_file", "Read": "read_file", "read_file": "read_file",
-    "write": "write_file", "Write": "write_file", "write_file": "write_file",
-    "http": "http", "Http": "http", "WebFetch": "http", "web_fetch": "http",
-    "python": "python", "Python": "python",
+    "read": "read", "Read": "read", "read_file": "read",
+    "write": "write", "Write": "write", "write_file": "write",
+    "edit": "edit", "Edit": "edit", "edit_file": "edit",
 }
 
 # name 格式校验正则：小写字母、数字、连字符，不能以连字符开头/结尾，不能连续连字符
@@ -290,18 +283,16 @@ def scan_skills(skills_dir: Path) -> Dict[str, SkillDefinition]:
 
 CAPABILITY_SCHEMAS: Dict[str, Dict[str, Any]] = {
     "bash": {"type": "function", "function": {"name": "bash", "description": "执行 shell 命令", "parameters": {"type": "object", "properties": {"command": {"type": "string", "description": "shell 命令"}}, "required": ["command"]}}},
-    "read_file": {"type": "function", "function": {"name": "read_file", "description": "读取文件内容", "parameters": {"type": "object", "properties": {"path": {"type": "string", "description": "文件路径"}, "max_lines": {"type": "integer", "description": "最大行数，默认200"}}, "required": ["path"]}}},
-    "write_file": {"type": "function", "function": {"name": "write_file", "description": "写入文件", "parameters": {"type": "object", "properties": {"path": {"type": "string", "description": "文件路径"}, "content": {"type": "string", "description": "内容"}}, "required": ["path", "content"]}}},
-    "http": {"type": "function", "function": {"name": "http", "description": "发起 HTTP 请求", "parameters": {"type": "object", "properties": {"url": {"type": "string", "description": "URL"}, "method": {"type": "string", "description": "GET/POST/PUT/DELETE"}, "body": {"type": "string", "description": "请求体"}}, "required": ["url"]}}},
-    "python": {"type": "function", "function": {"name": "python", "description": "执行 Python 代码并返回 stdout", "parameters": {"type": "object", "properties": {"code": {"type": "string", "description": "Python 代码"}}, "required": ["code"]}}},
+    "read": {"type": "function", "function": {"name": "read", "description": "读取文件内容（支持 txt/md/docx/pdf）", "parameters": {"type": "object", "properties": {"path": {"type": "string", "description": "文件路径"}, "max_lines": {"type": "integer", "description": "最大行数，默认200（仅文本文件有效）"}}, "required": ["path"]}}},
+    "write": {"type": "function", "function": {"name": "write", "description": "创建或覆盖文件", "parameters": {"type": "object", "properties": {"path": {"type": "string", "description": "文件路径"}, "content": {"type": "string", "description": "文件内容"}}, "required": ["path", "content"]}}},
+    "edit": {"type": "function", "function": {"name": "edit", "description": "编辑文件：查找并替换指定内容", "parameters": {"type": "object", "properties": {"path": {"type": "string", "description": "文件路径"}, "old_str": {"type": "string", "description": "要查找的原始文本"}, "new_str": {"type": "string", "description": "替换为的新文本"}}, "required": ["path", "old_str", "new_str"]}}},
 }
 
 
 def get_allowed_caps(skill: SkillDefinition, cap_cfg: CapabilitiesConfig) -> List[str]:
     """返回 skill 实际被允许的 capabilities。"""
-    perm = {"bash": cap_cfg.allow_bash, "read_file": cap_cfg.allow_read_file,
-            "write_file": cap_cfg.allow_write_file, "http": cap_cfg.allow_http,
-            "python": cap_cfg.allow_python}
+    perm = {"bash": cap_cfg.allow_bash, "read": cap_cfg.allow_read,
+            "write": cap_cfg.allow_write, "edit": cap_cfg.allow_edit}
     return [c for c in skill.capabilities if perm.get(c, False)]
 
 
@@ -309,14 +300,12 @@ async def run_capability(name: str, args: Dict[str, Any], cfg: CapabilitiesConfi
     """执行单个 capability tool。"""
     if name == "bash":
         return await _cap_bash(args.get("command", ""), cfg)
-    elif name == "read_file":
+    elif name == "read":
         return await _cap_read_file(args.get("path", ""), cfg, int(args.get("max_lines", 200)))
-    elif name == "write_file":
+    elif name == "write":
         return await _cap_write_file(args.get("path", ""), args.get("content", ""), cfg)
-    elif name == "http":
-        return await _cap_http(args.get("url", ""), cfg, args.get("method", "GET"), args.get("body", ""))
-    elif name == "python":
-        return await _cap_python(args.get("code", ""), cfg)
+    elif name == "edit":
+        return await _cap_edit_file(args.get("path", ""), args.get("old_str", ""), args.get("new_str", ""), cfg)
     return f"未知 capability: {name}"
 
 
@@ -347,15 +336,46 @@ async def _cap_bash(command: str, cfg: CapabilitiesConfig) -> str:
 
 async def _cap_read_file(path: str, cfg: CapabilitiesConfig, max_lines: int = 200) -> str:
     fp = Path(path).resolve()
-    if cfg.read_file_allowed_dirs:
-        allowed_roots = [Path(d).resolve() for d in cfg.read_file_allowed_dirs]
+    if cfg.read_allowed_dirs:
+        allowed_roots = [Path(d).resolve() for d in cfg.read_allowed_dirs]
         if not any(fp == root or root in fp.parents for root in allowed_roots):
             return f"安全策略阻止: {path} 不在白名单目录中"
     if fp.is_symlink():
         return f"安全策略阻止: 不允许读取符号链接"
     if not fp.exists():
         return f"文件不存在: {path}"
+
+    suffix = fp.suffix.lower()
     try:
+        # docx 文件
+        if suffix == ".docx":
+            try:
+                from docx import Document
+            except ImportError:
+                return "缺少 python-docx 依赖，无法读取 docx 文件"
+            doc = Document(str(fp))
+            content = "\n".join(p.text for p in doc.paragraphs)
+            if len(content) > 60000:
+                return content[:60000] + f"\n... (截断，共 {len(content)} 字符)"
+            return content
+
+        # pdf 文件
+        if suffix == ".pdf":
+            try:
+                from pypdf import PdfReader
+            except ImportError:
+                return "缺少 pypdf 依赖，无法读取 pdf 文件"
+            reader = PdfReader(str(fp))
+            pages = []
+            for i, page in enumerate(reader.pages, 1):
+                text = page.extract_text() or ""
+                pages.append(f"--- 第 {i} 页 ---\n{text.strip()}")
+            content = "\n\n".join(pages)
+            if len(content) > 60000:
+                return content[:60000] + f"\n... (截断，共 {len(content)} 字符)"
+            return content
+
+        # 纯文本（txt/md 等）
         lines = fp.read_text(encoding="utf-8", errors="replace").splitlines()
         if len(lines) > max_lines:
             return "\n".join(lines[:max_lines]) + f"\n... (截断，共 {len(lines)} 行)"
@@ -366,12 +386,12 @@ async def _cap_read_file(path: str, cfg: CapabilitiesConfig, max_lines: int = 20
 
 async def _cap_write_file(path: str, content: str, cfg: CapabilitiesConfig) -> str:
     fp = Path(path).resolve()
-    if cfg.write_file_allowed_dirs:
-        allowed_roots = [Path(d).resolve() for d in cfg.write_file_allowed_dirs]
+    if cfg.write_allowed_dirs:
+        allowed_roots = [Path(d).resolve() for d in cfg.write_allowed_dirs]
         if not any(fp == root or root in fp.parents for root in allowed_roots):
             return f"安全策略阻止: {path} 不在白名单目录中"
-    if len(content.encode()) > cfg.write_file_max_size_kb * 1024:
-        return f"内容超过 {cfg.write_file_max_size_kb}KB 限制"
+    if len(content.encode()) > cfg.write_max_size_kb * 1024:
+        return f"内容超过 {cfg.write_max_size_kb}KB 限制"
     try:
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(content, encoding="utf-8")
@@ -380,40 +400,29 @@ async def _cap_write_file(path: str, content: str, cfg: CapabilitiesConfig) -> s
         return f"写入失败: {e}"
 
 
-async def _cap_http(url: str, cfg: CapabilitiesConfig, method: str = "GET", body: str = "") -> str:
-    if cfg.http_allowed_domains:
-        domain = urlparse(url).hostname or ""
-        if not any(domain.endswith(d) for d in cfg.http_allowed_domains):
-            return f"安全策略阻止: 域名 {domain} 不在白名单中"
+async def _cap_edit_file(path: str, old_str: str, new_str: str, cfg: CapabilitiesConfig) -> str:
+    """查找替换文件内容。"""
+    fp = Path(path).resolve()
+    if cfg.write_allowed_dirs:
+        allowed_roots = [Path(d).resolve() for d in cfg.write_allowed_dirs]
+        if not any(fp == root or root in fp.parents for root in allowed_roots):
+            return f"安全策略阻止: {path} 不在白名单目录中"
+    if not fp.exists():
+        return f"文件不存在: {path}"
+    if not fp.is_file():
+        return f"不是普通文件: {path}"
+    if not old_str:
+        return "old_str 不能为空"
     try:
-        import aiohttp
-        timeout = aiohttp.ClientTimeout(total=cfg.http_timeout)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            kw: Dict[str, Any] = {}
-            if body and method.upper() in ("POST", "PUT", "PATCH"):
-                kw["data"] = body
-            async with session.request(method.upper(), url, **kw) as resp:
-                text = await resp.text()
-                text = text[:30000] + "..." if len(text) > 30000 else text
-                return f"[{resp.status}]\n{text}"
-    except asyncio.TimeoutError:
-        return f"HTTP 超时 ({cfg.http_timeout}s)"
+        content = fp.read_text(encoding="utf-8", errors="replace")
+        if old_str not in content:
+            return f"未找到要替换的内容"
+        count = content.count(old_str)
+        new_content = content.replace(old_str, new_str)
+        fp.write_text(new_content, encoding="utf-8")
+        return f"已替换 {count} 处匹配"
     except Exception as e:
-        return f"HTTP 失败: {e}"
-
-
-async def _cap_python(code: str, cfg: CapabilitiesConfig) -> str:
-    stdout_buf = io.StringIO()
-    local_vars: Dict[str, Any] = {}
-    try:
-        with contextlib.redirect_stdout(stdout_buf):
-            exec(compile(code, "<skill_python>", "exec"), {"__builtins__": __builtins__}, local_vars)
-        output = stdout_buf.getvalue()
-        if not output and "result" in local_vars:
-            output = str(local_vars["result"])
-        return output[:20000] if output else "(无输出)"
-    except Exception as e:
-        return f"Python 错误: {e}\n{traceback.format_exc()}"
+        return f"编辑失败: {e}"
 
 
 # ====== Agent Loop ======

@@ -20,7 +20,18 @@
     "min_version": "2.0.0",
     "max_version": "2.99.0"
   },
-  "dependencies": [],
+  "dependencies": [
+    {
+      "type": "python_package",
+      "name": "python-docx",
+      "version_spec": ">=1.1.2"
+    },
+    {
+      "type": "python_package",
+      "name": "pypdf",
+      "version_spec": ">=5.0.0"
+    }
+  ],
   "capabilities": [
     "llm.generate",
     "llm.generate_with_tools",
