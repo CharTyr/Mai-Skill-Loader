@@ -98,6 +98,8 @@ metadata:
   maibot-model: "deepseek-v4-flash"
 ```
 
+这里填的是 MaiBot `model_config.toml` 中已配置模型的 `name` 字段值。只能使用主程序模型列表中已有的模型，不能填任意模型名。
+
 这样你可以给简单 skill 用便宜快速的模型，给复杂 skill 用更强的模型。如果不指定，使用系统默认模型。
 
 ## 管理命令
