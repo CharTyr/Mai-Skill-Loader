@@ -48,7 +48,17 @@ class CapabilitiesConfig(PluginConfigBase):
     bash_working_dir: str = Field(default="", description="bash 工作目录（空=插件目录）")
     bash_timeout: int = Field(default=30, description="bash 命令超时（秒）")
     bash_blocked_commands: List[str] = Field(
-        default_factory=lambda: ["rm -rf /", "mkfs", "dd if=", "shutdown", "reboot"],
+        default_factory=lambda: [
+            "rm -rf /", "rm -rf ~", "rm -rf .", "rmdir /",
+            "mkfs", "dd if=", "shutdown", "reboot", "poweroff", "init 0", "init 6",
+            "chmod -R 777 /", "chown -R", ":(){ :|:& };:",
+            "curl|bash", "curl|sh", "wget|bash", "wget|sh",
+            "> /dev/sda", "mv / ", "cat /dev/zero",
+            "passwd", "useradd", "userdel", "visudo",
+            "iptables -F", "ufw disable",
+            "systemctl stop", "systemctl disable",
+            "kill -9 1", "killall",
+        ],
         description="禁止的命令模式",
     )
     read_allowed_dirs: List[str] = Field(default_factory=list, description="读取目录白名单（空=不限）")
