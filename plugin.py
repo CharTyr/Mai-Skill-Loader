@@ -236,9 +236,10 @@ def parse_skill(skill_path: Path) -> Optional[SkillDefinition]:
 def scan_skills(skills_dir: Path) -> Dict[str, SkillDefinition]:
     """扫描目录返回 {name: SkillDefinition}。
     
-    支持两种布局：
+    支持多种布局：
     1. 直接子目录: skills_dir/<skill-name>/SKILL.md
     2. .agents/skills 标准路径: skills_dir/.agents/skills/<skill-name>/SKILL.md
+    3. 项目根 .agents/skills: 向上查找项目根目录的 .agents/skills/
     """
     result: Dict[str, SkillDefinition] = {}
     if not skills_dir.exists():
@@ -252,10 +253,25 @@ def scan_skills(skills_dir: Path) -> Dict[str, SkillDefinition]:
         if skill:
             result[skill.name] = skill
 
-    # 扫描 .agents/skills/ 标准路径（npx skills add 安装位置）
+    # 扫描 .agents/skills/ 标准路径（npx skills add 在 skills_dir 下执行时的安装位置）
     agents_skills_dir = skills_dir / ".agents" / "skills"
     if agents_skills_dir.exists():
         for item in sorted(agents_skills_dir.iterdir()):
+            if not item.is_dir() or item.name.startswith(("_", ".")):
+                continue
+            skill = parse_skill(item)
+            if skill and skill.name not in result:
+                result[skill.name] = skill
+
+    # 扫描项目根目录的 .agents/skills/（npx skills add 在项目根执行时的安装位置）
+    # 从 skills_dir 向上找到包含 bot.py 或 pyproject.toml 的目录
+    project_root = skills_dir.parent.parent  # plugins/skill_loader/skills → plugins/skill_loader → plugins → project_root
+    # 再上一级到真正的项目根
+    if not (project_root / "bot.py").exists():
+        project_root = project_root.parent
+    root_agents_dir = project_root / ".agents" / "skills"
+    if root_agents_dir.exists() and root_agents_dir != agents_skills_dir:
+        for item in sorted(root_agents_dir.iterdir()):
             if not item.is_dir() or item.name.startswith(("_", ".")):
                 continue
             skill = parse_skill(item)

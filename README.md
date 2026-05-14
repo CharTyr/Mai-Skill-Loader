@@ -17,24 +17,43 @@ git clone https://github.com/CharTyr/Mai-Skill-Loader.git skill_loader
 
 ### 2. 安装 Skill
 
-**方式一：用 npx 命令安装（推荐）**
+**方式一：从 GitHub 下载**
+
+找到你想要的 skill（比如在 [skills.sh](https://skills.sh) 上浏览），把它的文件夹放进 `plugins/skill_loader/skills/` 目录：
+
+```bash
+cd plugins/skill_loader/skills
+git clone https://github.com/someone/some-skill.git my-skill
+# 或者直接复制文件夹进来
+```
+
+确保目录结构是这样的：
+```
+plugins/skill_loader/skills/my-skill/SKILL.md
+```
+
+**方式二：用 npx skills 命令**
+
+在 `plugins/skill_loader/skills/` 目录下执行（注意必须在这个目录下）：
 
 ```bash
 cd plugins/skill_loader/skills
 npx skills add https://github.com/vercel-labs/skills --skill find-skills -y
 ```
 
-安装完成后使用 `/skill reload` 让 bot 加载新 skill。
+这会安装到 `.agents/skills/` 子目录，插件会自动扫描到。
 
-**方式二：手动添加**
+**方式三：手动创建**
 
-在 `plugins/skill_loader/skills/` 下创建文件夹，放入 `SKILL.md` 即可：
+直接在 `skills/` 下新建文件夹，写一个 `SKILL.md`：
 
 ```
 plugins/skill_loader/skills/
 └── my-skill/
     └── SKILL.md
 ```
+
+安装完成后使用 `/skill reload` 让 bot 加载新 skill。
 
 ### 3. 使用
 
