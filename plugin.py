@@ -70,14 +70,23 @@ class CapabilitiesConfig(PluginConfigBase):
     )
 
 
+class PluginSectionConfig(PluginConfigBase):
+    """插件基础配置节。"""
+    __ui_label__ = "插件"
+    __ui_icon__ = "package"
+    __ui_order__ = 0
+
+    enabled: bool = Field(default=True, description="是否启用插件")
+    config_version: str = Field(default="1.0.0", description="配置版本")
+
+
 class SkillLoaderConfig(PluginConfigBase):
     """Skill Loader 主配置。"""
     __ui_label__ = "Skill Loader"
     __ui_icon__ = "zap"
     __ui_order__ = 0
 
-    enabled: bool = Field(default=True, description="是否启用")
-    config_version: str = Field(default="1.0.0", description="配置版本")
+    plugin: PluginSectionConfig = Field(default_factory=PluginSectionConfig)
     skills_dir: str = Field(default="skills", description="skills 目录路径")
     default_model: str = Field(default="", description="agent 默认模型（空=系统默认）")
     default_max_turns: int = Field(default=10, description="agent 默认最大轮数")

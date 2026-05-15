@@ -1,9 +1,11 @@
 # Skill Loader 配置
 # 修改后使用 /skill reload 或重启 bot 生效
 
-[skill_loader]
+[plugin]
 enabled = true
 config_version = "1.0.0"
+
+[skill_loader]
 skills_dir = "skills"
 default_model = ""           # 留空使用系统默认模型，填写 model_config.toml 中的模型 name
 default_max_turns = 10       # agent 模式默认最大轮数
